@@ -1,0 +1,3 @@
+# Architecture
+
+FastAPI is the control plane; PostgreSQL stores durable state; Redis is the worker boundary. Lifecycle: IDEA -> RESEARCHED -> SCRIPTED -> GENERATED -> QC -> POLICY -> READY_FOR_REVIEW -> APPROVED -> UPLOADED. REJECTED is terminal for the current artifact. Ollama is the default local AI adapter. Safety gates are independent: rights, disclosure, advertiser pre-check, variation, budget, quota, kill switch, human approval. FFmpeg belongs behind a renderer adapter. YouTube publishing belongs behind a publisher adapter and stays disabled until OAuth/resumable-upload staging tests pass.
