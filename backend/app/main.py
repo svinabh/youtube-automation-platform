@@ -5,15 +5,15 @@ from .config import get_settings
 from .db import get_db,init_db
 from .media import FFmpegRenderer
 from .models import AuditEvent,Video,VideoState
-from .services import AIProvider,DisclosureTagger,PolicyEngine,VariationGuard,YouTubePublisher
+from .services import AIProvider,DisclosureTagger,PolicyEngine,RightsRegistry,VariationGuard,YouTubePublisher
 from .state import can_transition
 app=FastAPI(title="YouTube Automation Platform",version="1.1.0");settings=get_settings()
 @app.on_event("startup")
 def startup(): init_db()
 class VideoCreate(BaseModel):
- topic:str=Field(min_length=3,max_length=300);title:str=Field(min_length=3,max_length=200);description:str="";script:str="";rights_cleared:bool=False
+ topic:str=Field(min_length=3,max_length=300);title:str=Field(min_length=3,max_length=200);description:str="";script:str="";assets:list[dict]=Field(default_factory=list)
 class Approval(BaseModel): approve:bool
-def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path","")}
+def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"assets":v.assets,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path","")}
 def move(db,v,target,actor):
  old=VideoState(v.state)
  if not can_transition(old,target): raise HTTPException(409,f"Invalid transition {old}->{target}")
@@ -22,6 +22,9 @@ async def run_pipeline(video:Video,db:Session):
  if video.state==VideoState.IDEA: move(db,video,VideoState.RESEARCHED,"orchestrator")
  if video.state==VideoState.RESEARCHED: move(db,video,VideoState.SCRIPTED,"orchestrator")
  if video.state==VideoState.SCRIPTED:
+  video.rights_cleared=RightsRegistry().cleared(video.assets or [])
+  if not video.rights_cleared:
+   move(db,video,VideoState.REJECTED,"rights_registry");db.commit();return
   if not video.script:
    prompt="Write an original YouTube script for this topic. Do not invent facts; clearly mark claims needing verification. Topic: "+video.topic
    generated=(await AIProvider.get().generate(prompt)).strip()
@@ -48,7 +51,7 @@ def dashboard(db:Session=Depends(get_db)):
  return {"approval_required":settings.human_approval_required,"kill_switch":settings.global_kill_switch,"pending":[out(v) for v in vs if v.state==VideoState.READY_FOR_REVIEW.value],"recent":[out(v) for v in vs[:20]]}
 @app.post("/api/videos")
 def create(p:VideoCreate,db:Session=Depends(get_db)):
- v=Video(topic=p.topic,title=p.title,description=p.description,script=p.script,rights_cleared=p.rights_cleared);db.add(v);db.commit();db.refresh(v);return out(v)
+ v=Video(topic=p.topic,title=p.title,description=p.description,script=p.script,assets=p.assets,rights_cleared=False);db.add(v);db.commit();db.refresh(v);return out(v)
 @app.post("/api/videos/{vid}/run")
 async def run(vid:str,db:Session=Depends(get_db)):
  v=db.get(Video,vid)
