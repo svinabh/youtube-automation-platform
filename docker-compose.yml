@@ -1,19 +1,31 @@
 services:
- postgres:
-  image: postgres:16-alpine
-  environment: {POSTGRES_DB: ytautomation,POSTGRES_USER: postgres,POSTGRES_PASSWORD: postgres}
-  volumes: [postgres_data:/var/lib/postgresql/data]
-  healthcheck: {test: ["CMD-SHELL","pg_isready -U postgres -d ytautomation"],interval: 5s,timeout: 5s,retries: 10}
- redis: {image: redis:7-alpine}
- backend:
-  build: ./backend
-  env_file: .env
-  environment: {DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/ytautomation,REDIS_URL: redis://redis:6379/0}
-  ports: ["8000:8000"]
-  depends_on: [postgres,redis]
- frontend:
-  build: ./frontend
-  environment: {NEXT_PUBLIC_API_URL: http://localhost:8000}
-  ports: ["3000:3000"]
-  depends_on: [backend]
-volumes: {postgres_data: {}}
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ytautomation
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres -d ytautomation"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/ytautomation
+    ports: ["8000:8000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  frontend:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on: [backend]
+volumes:
+  postgres_data:
