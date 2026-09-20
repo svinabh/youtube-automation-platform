@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import ClassVar
 import hashlib
 import re
 import httpx
@@ -38,8 +39,8 @@ class DisclosureTagger:
                 (["production assistance only"] if production_assistance_only else ["no trigger evidence"])}
 
 class AdvertiserPrecheck:
-    HIGH_RISK={"graphic violence","sexual content","slur","hate","drugs","firearms"}
-    MEDIUM_RISK={"shocking","controversial issue","sensitive event","self-harm","suicide","domestic abuse","terrorism","war","conflict"}
+    HIGH_RISK: ClassVar[frozenset[str]] = frozenset({"graphic violence","sexual content","slur","hate","drugs","firearms"})
+    MEDIUM_RISK: ClassVar[frozenset[str]] = frozenset({"shocking","controversial issue","sensitive event","self-harm","suicide","domestic abuse","terrorism","war","conflict"})
     def evaluate(self, text: str) -> Result:
         lower=text.lower()
         high=sorted(t for t in self.HIGH_RISK if t in lower)
@@ -55,7 +56,7 @@ class PolicyEngine:
         if not rights: reasons.append("rights not cleared")
         if len(title.strip())<3: reasons.append("title too short")
         if not script.strip(): reasons.append("empty script")
-        ad=AdvertiserPrecheck().evaluate(" ".join([title,description,script]))
+        ad=AdvertiserPrecheck().evaluate(f"{title} {description} {script}")
         reasons.extend(ad.reasons)
         return Result(not reasons and ad.risk_level!="HIGH",reasons,ad.score,ad.risk_level)
 
@@ -83,7 +84,7 @@ class AIProvider:
     @staticmethod
     def get():
         s=get_settings()
-        return OllamaProvider(s.ollama_base_url,s.ollama_model) if getattr(s,"ai_provider","ollama")=="ollama" else MockProvider()
+        return OllamaProvider(s.ollama_base_url,s.ollama_model) if s.ai_provider=="ollama" else MockProvider()
 
 class YouTubePublisher:
     async def upload(self,path,title,description,disclosure):
