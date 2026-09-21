@@ -16,6 +16,7 @@ SessionLocal = sessionmaker(bind=engine)
 
 REVIEW_COLUMNS = {
     "disclosure_suggestion": "BOOLEAN NOT NULL DEFAULT FALSE",
+    "advertiser_risk_level": "VARCHAR(16) NOT NULL DEFAULT 'LOW'",
     "disclosure_suggestion_reason": "TEXT NOT NULL DEFAULT ''",
     "human_watched_confirmed": "BOOLEAN NOT NULL DEFAULT FALSE",
     "human_disclosure_answer": "BOOLEAN",
