@@ -9,3 +9,10 @@ Human approval is ON by default and publishing is OFF by default. Daily founder 
 Media uploads are limited by `MAX_MEDIA_UPLOAD_MB` and stored under the Docker named `media_data` volume.
 
 For local development, the default `ALLOWED_ORIGINS` is `["http://localhost:3000"]`. Production deployments must explicitly set `ALLOWED_ORIGINS` to the exact trusted frontend origins; never use `*` as an origin.
+
+
+### Founder review gate
+
+At READY_FOR_REVIEW, the dashboard presents the uploaded MP4, download fallback, script/brief, rights result, advertiser-risk heuristic, and the disclosure suggestion with its reason in one mobile-friendly review card. The disclosure suggestion is only a pre-fill hint; the founder must explicitly select Yes or No and confirm that they watched the full video and it matches the script/brief. Approval stays disabled until the video is playable, the disclosure choice is explicitly confirmed, and the watch-confirmation checkbox is checked.
+
+Automated checks are text/metadata checks only and cannot verify the actual video/audio. The final visual/audio match decision remains human.
