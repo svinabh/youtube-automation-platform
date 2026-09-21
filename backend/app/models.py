@@ -7,7 +7,7 @@ from sqlalchemy.orm import DeclarativeBase,Mapped,mapped_column
 class Base(DeclarativeBase): pass
 
 class VideoState(StrEnum):
- IDEA="IDEA";RESEARCHED="RESEARCHED";SCRIPTED="SCRIPTED";GENERATED="GENERATED";QC="QC";POLICY="POLICY";READY_FOR_REVIEW="READY_FOR_REVIEW";APPROVED="APPROVED";REJECTED="REJECTED";UPLOADED="UPLOADED";FAILED="FAILED"
+ IDEA="IDEA";RESEARCHED="RESEARCHED";SCRIPTED="SCRIPTED";GENERATED="GENERATED";QC="QC";POLICY="POLICY";READY_FOR_REVIEW="READY_FOR_REVIEW";APPROVED="APPROVED";REJECTED="REJECTED";UPLOADED="UPLOADED";SIMULATED_UPLOAD="SIMULATED_UPLOAD";FAILED="FAILED"
 
 class Video(Base):
  __tablename__="videos"
@@ -15,7 +15,7 @@ class Video(Base):
  title:Mapped[str]=mapped_column(String(200));topic:Mapped[str]=mapped_column(String(300));description:Mapped[str]=mapped_column(Text,default="");script:Mapped[str]=mapped_column(Text,default="")
  state:Mapped[str]=mapped_column(String(32),default=VideoState.IDEA.value);artifact_path:Mapped[str]=mapped_column(String(500),default="")
  assets:Mapped[list[dict]]=mapped_column(JSON,default=list)
- rights_cleared:Mapped[bool]=mapped_column(Boolean,default=False);policy_passed:Mapped[bool]=mapped_column(Boolean,default=False);disclosure_required:Mapped[bool]=mapped_column(Boolean,default=False);approved_by_human:Mapped[bool]=mapped_column(Boolean,default=False)
+ rights_cleared:Mapped[bool]=mapped_column(Boolean,default=False);policy_passed:Mapped[bool]=mapped_column(Boolean,default=False);disclosure_required:Mapped[bool]=mapped_column(Boolean,default=False);approved_by_human:Mapped[bool]=mapped_column(Boolean,default=False);simulated_upload:Mapped[bool]=mapped_column(Boolean,default=False)
  created_at:Mapped[datetime]=mapped_column(DateTime,default=lambda:datetime.now(timezone.utc))
 
 class AuditEvent(Base):
