@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 import hashlib
+import json
 import re
 import httpx
 from .config import get_settings
@@ -26,6 +27,27 @@ class VariationGuard:
 class RightsRegistry:
     def cleared(self, assets: list[dict]) -> bool:
         return bool(assets) and all(a.get("cleared") is True and a.get("license") for a in assets)
+
+class VideoBriefGenerator:
+    async def generate(self, script:str, title:str, topic:str)->str:
+        prompt=(
+            "Create a production-ready video brief from this YouTube script. "
+            "Return valid JSON only with keys: scenes (array of objects with scene_number, "
+            "duration_seconds, visual, tone, narration_focus), target_duration_seconds, "
+            "aspect_ratio (9:16 or 16:9), voice_and_pacing_notes. "
+            "Do not write a new script or invent factual claims. "
+            f"Title: {title}\nTopic: {topic}\nScript:\n{script}"
+        )
+        output=(await AIProvider.get().generate(prompt)).strip()
+        if not output: raise RuntimeError("AI returned an empty video brief")
+        try:
+            parsed=json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("AI returned a non-JSON video brief") from exc
+        required={"scenes","target_duration_seconds","aspect_ratio","voice_and_pacing_notes"}
+        if not required.issubset(parsed) or not isinstance(parsed["scenes"],list):
+            raise RuntimeError("AI video brief missing required structured fields")
+        return json.dumps(parsed,ensure_ascii=False,indent=2)
 
 class DisclosureTagger:
     def evaluate(self, realistic_synthetic=False, altered_real_person=False, altered_real_event=False,
