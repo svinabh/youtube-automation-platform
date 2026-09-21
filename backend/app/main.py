@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel,Field
 from sqlalchemy.orm import Session
 from .config import get_settings
+from .auth import require_founder_auth
 from .db import get_db,init_db
 from .media import FFmpegRenderer
 from .models import AuditEvent,Video,VideoState
@@ -14,7 +15,10 @@ app=FastAPI(title="YouTube Automation Platform",version="1.2.0");settings=get_se
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 
 @app.on_event("startup")
-def startup(): init_db()
+def startup():
+    if settings.app_env != "development" and not settings.founder_api_key:
+        raise RuntimeError("FOUNDER_API_KEY must be set when APP_ENV is not development.")
+    init_db()
 
 class VideoCreate(BaseModel):
     topic:str=Field(min_length=3,max_length=300);title:str=Field(min_length=3,max_length=200);description:str="";script:str="";assets:list[dict]=Field(default_factory=list)
@@ -67,23 +71,23 @@ async def run_pipeline(video:Video,db:Session):
 def health(): return {"status":"ok","kill_switch":settings.global_kill_switch}
 
 @app.get("/api/dashboard")
-def dashboard(db:Session=Depends(get_db)):
+def dashboard(_: None = Depends(require_founder_auth), db:Session=Depends(get_db)):
     vs=db.query(Video).order_by(Video.created_at.desc()).limit(50).all()
     return {"approval_required":settings.human_approval_required,"kill_switch":settings.global_kill_switch,"pending":[out(v) for v in vs if v.state==VideoState.READY_FOR_REVIEW.value],"recent":[out(v) for v in vs[:20]]}
 
 @app.post("/api/videos")
-def create(p:VideoCreate,db:Session=Depends(get_db)):
+def create(p:VideoCreate, _: None = Depends(require_founder_auth), db:Session=Depends(get_db)):
     v=Video(topic=p.topic,title=p.title,description=p.description,script=p.script,assets=p.assets,rights_cleared=False);db.add(v);db.commit();db.refresh(v);return out(v)
 
 @app.post("/api/videos/{vid}/run")
-async def run(vid:str,db:Session=Depends(get_db)):
+async def run(vid:str, _: None = Depends(require_founder_auth), db:Session=Depends(get_db)):
     v=db.get(Video,vid)
     if not v: raise HTTPException(404,"Video not found")
     if settings.global_kill_switch: raise HTTPException(423,"Global kill switch active")
     await run_pipeline(v,db);return out(v)
 
 @app.post("/api/videos/{vid}/media")
-async def receive_media(vid:str,file:UploadFile=File(...),db:Session=Depends(get_db)):
+async def receive_media(vid:str,file:UploadFile=File(...),_: None = Depends(require_founder_auth),db:Session=Depends(get_db)):
     v=db.get(Video,vid)
     if not v: raise HTTPException(404,"Video not found")
     if v.state!=VideoState.BRIEF_READY.value: raise HTTPException(409,"Video brief must be ready before media upload")
@@ -111,7 +115,7 @@ async def receive_media(vid:str,file:UploadFile=File(...),db:Session=Depends(get
     return out(v)
 
 @app.get("/api/videos/{vid}/media")
-def stream_media(vid: str, db: Session = Depends(get_db)):
+def stream_media(vid: str, _: None = Depends(require_founder_auth), db: Session = Depends(get_db)):
     v = db.get(Video, vid)
     if not v:
         raise HTTPException(404, "Video not found")
@@ -126,7 +130,7 @@ def stream_media(vid: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/videos/{vid}/review")
-def review(vid: str, p: HumanReview, db: Session = Depends(get_db)):
+def review(vid: str, p: HumanReview, _: None = Depends(require_founder_auth), db: Session = Depends(get_db)):
     v = db.get(Video, vid)
     if not v:
         raise HTTPException(404, "Video not found")
@@ -151,7 +155,7 @@ def review(vid: str, p: HumanReview, db: Session = Depends(get_db)):
 
 
 @app.post("/api/videos/{vid}/approval")
-def approval(vid:str,p:Approval,db:Session=Depends(get_db)):
+def approval(vid:str,p:Approval, _: None = Depends(require_founder_auth),db:Session=Depends(get_db)):
     v=db.get(Video,vid)
     if not v: raise HTTPException(404,"Video not found")
     if v.state!=VideoState.READY_FOR_REVIEW.value: raise HTTPException(409,"Not awaiting approval")
@@ -160,7 +164,7 @@ def approval(vid:str,p:Approval,db:Session=Depends(get_db)):
     move(db,v,VideoState.APPROVED if p.approve else VideoState.REJECTED,"founder");v.approved_by_human=p.approve;db.commit();return out(v)
 
 @app.post("/api/videos/{vid}/publish")
-async def publish(vid:str,db:Session=Depends(get_db)):
+async def publish(vid:str, _: None = Depends(require_founder_auth), db:Session=Depends(get_db)):
     v=db.get(Video,vid)
     if not v: raise HTTPException(404,"Video not found")
     if settings.global_kill_switch: raise HTTPException(423,"Global kill switch active")
