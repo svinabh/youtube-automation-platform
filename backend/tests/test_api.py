@@ -9,6 +9,11 @@ from app.main import app
 from app.models import AuditEvent,Base,Video,VideoState
 from app.services import ReviewSuggestionEngine, YouTubePublisher
 
+TEST_KEY = "test-founder-key"
+get_settings().founder_api_key = TEST_KEY
+AUTH = {"Authorization": f"Bearer {TEST_KEY}"}
+BAD_AUTH = {"Authorization": "Bearer wrong-key"}
+
 def make_db():
  engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool)
  Base.metadata.create_all(engine)
@@ -36,7 +41,7 @@ def test_health():
 def test_publish_disabled_never_marks_uploaded_and_records_simulation():
  db=make_db();app.dependency_overrides[get_db]=override_db(db)
  try:
-  video=make_approved_video(db);response=TestClient(app).post(f"/api/videos/{video.id}/publish")
+  video=make_approved_video(db);response=TestClient(app).post(f"/api/videos/{video.id}/publish",headers=AUTH)
   assert response.status_code==200
   db.refresh(video)
   assert video.state==VideoState.SIMULATED_UPLOAD.value
@@ -53,7 +58,7 @@ def test_real_published_status_is_required_for_uploaded_state(monkeypatch):
   async def upload(self,path,title,description,disclosure): return {"status":"PUBLISHED","video_id":"yt-real-123"}
  monkeypatch.setattr("app.main.YouTubePublisher",RealPublisher)
  try:
-  video=make_approved_video(db);response=TestClient(app).post(f"/api/videos/{video.id}/publish")
+  video=make_approved_video(db);response=TestClient(app).post(f"/api/videos/{video.id}/publish",headers=AUTH)
   assert response.status_code==200
   db.refresh(video);assert video.state==VideoState.UPLOADED.value;assert video.simulated_upload is False
   event=db.query(AuditEvent).filter_by(video_id=video.id,event="real_publish").one()
@@ -75,7 +80,7 @@ def test_media_upload_requires_mp4_and_starts_at_brief_ready(tmp_path,monkeypatc
  monkeypatch.setattr(get_settings(),"media_root",str(tmp_path))
  try:
   video=make_brief_video(db)
-  response=TestClient(app).post(f"/api/videos/{video.id}/media",files={"file":("clip.txt",b"not-video","text/plain")})
+  response=TestClient(app).post(f"/api/videos/{video.id}/media",headers=AUTH,files={"file":("clip.txt",b"not-video","text/plain")})
   assert response.status_code==415
   db.refresh(video);assert video.state==VideoState.BRIEF_READY.value
  finally:
@@ -86,7 +91,7 @@ def test_media_upload_stores_finished_mp4_durably_and_transitions(tmp_path,monke
  monkeypatch.setattr(get_settings(),"media_root",str(tmp_path))
  try:
   video=make_brief_video(db)
-  response=TestClient(app).post(f"/api/videos/{video.id}/media",files={"file":("clip.mp4",b"finished-video-placeholder","video/mp4")})
+  response=TestClient(app).post(f"/api/videos/{video.id}/media",headers=AUTH,files={"file":("clip.mp4",b"finished-video-placeholder","video/mp4")})
   assert response.status_code==200
   db.refresh(video)
   assert video.state==VideoState.MEDIA_RECEIVED.value
@@ -101,7 +106,7 @@ def test_media_upload_rejects_wrong_state(tmp_path,monkeypatch):
  monkeypatch.setattr(get_settings(),"media_root",str(tmp_path))
  try:
   video=make_approved_video(db)
-  response=TestClient(app).post(f"/api/videos/{video.id}/media",files={"file":("clip.mp4",b"x","video/mp4")})
+  response=TestClient(app).post(f"/api/videos/{video.id}/media",headers=AUTH,files={"file":("clip.mp4",b"x","video/mp4")})
   assert response.status_code==409
  finally:
   app.dependency_overrides.clear();db.close()
@@ -146,6 +151,7 @@ def test_review_endpoint_rejects_without_watched_confirmation():
         video = make_ready_for_review_video(db, suggestion=True)
         response = TestClient(app).post(
             f"/api/videos/{video.id}/review",
+            headers=AUTH,
             json={"watched_confirmed": False, "disclosure_answer": True},
         )
         assert response.status_code == 400
@@ -165,6 +171,7 @@ def test_approval_is_blocked_until_human_review_is_submitted():
         video = make_ready_for_review_video(db, suggestion=True)
         response = TestClient(app).post(
             f"/api/videos/{video.id}/approval",
+            headers=AUTH,
             json={"approve": True},
         )
         assert response.status_code == 409
@@ -183,6 +190,7 @@ def test_human_disclosure_answer_overrides_system_suggestion():
         video = make_ready_for_review_video(db, suggestion=True)
         response = TestClient(app).post(
             f"/api/videos/{video.id}/review",
+            headers=AUTH,
             json={"watched_confirmed": True, "disclosure_answer": False},
         )
         assert response.status_code == 200
@@ -204,11 +212,13 @@ def test_approval_succeeds_after_explicit_human_review():
         video = make_ready_for_review_video(db, suggestion=True)
         review = TestClient(app).post(
             f"/api/videos/{video.id}/review",
+            headers=AUTH,
             json={"watched_confirmed": True, "disclosure_answer": True},
         )
         assert review.status_code == 200
         approval_response = TestClient(app).post(
             f"/api/videos/{video.id}/approval",
+            headers=AUTH,
             json={"approve": True},
         )
         assert approval_response.status_code == 200
@@ -228,10 +238,76 @@ def test_uploaded_media_is_streamed_by_review_endpoint(tmp_path):
         video = make_ready_for_review_video(db)
         video.artifact_path = str(media)
         db.commit()
-        response = TestClient(app).get(f"/api/videos/{video.id}/media")
+        response = TestClient(app).get(f"/api/videos/{video.id}/media",headers=AUTH)
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("video/mp4")
         assert response.content == b"fake-mp4-for-stream-test"
     finally:
         app.dependency_overrides.clear()
         db.close()
+
+
+def test_write_endpoint_requires_founder_auth():
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        response = TestClient(app).post("/api/videos", json={"topic": "solar energy", "title": "Solar Energy Explained"}, headers=BAD_AUTH)
+        assert response.status_code == 401
+        response = TestClient(app).post("/api/videos", json={"topic": "solar energy", "title": "Solar Energy Explained"})
+        assert response.status_code == 401
+        response = TestClient(app).post("/api/videos", json={"topic": "solar energy", "title": "Solar Energy Explained"}, headers=AUTH)
+        assert response.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+def test_dashboard_requires_founder_auth():
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        client = TestClient(app)
+        assert client.get("/api/dashboard").status_code == 401
+        assert client.get("/api/dashboard", headers=BAD_AUTH).status_code == 401
+        assert client.get("/api/dashboard", headers=AUTH).status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+def test_health_remains_public():
+    assert TestClient(app).get("/health").status_code == 200
+
+
+
+def test_all_write_endpoints_reject_missing_and_wrong_auth():
+    client = TestClient(app)
+    cases = [
+        ("/api/videos", "post", {"json": {"topic": "solar energy", "title": "Solar Energy Explained"}}),
+        ("/api/videos/no-such/run", "post", {}),
+        ("/api/videos/no-such/media", "post", {"files": {"file": ("clip.mp4", b"x", "video/mp4")}}),
+        ("/api/videos/no-such/review", "post", {"json": {"watched_confirmed": True, "disclosure_answer": True}}),
+        ("/api/videos/no-such/approval", "post", {"json": {"approve": True}}),
+        ("/api/videos/no-such/publish", "post", {}),
+    ]
+    for path, method, kwargs in cases:
+        response = getattr(client, method)(path, **kwargs)
+        assert response.status_code == 401, (path, response.status_code, response.text)
+        response = getattr(client, method)(path, headers=BAD_AUTH, **kwargs)
+        assert response.status_code == 401, (path, response.status_code, response.text)
+
+
+def test_production_startup_requires_founder_api_key(monkeypatch):
+    settings = get_settings()
+    original_env = settings.app_env
+    original_key = settings.founder_api_key
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "founder_api_key", "")
+    from app.main import startup
+    try:
+        import pytest
+        with pytest.raises(RuntimeError, match="FOUNDER_API_KEY"):
+            startup()
+    finally:
+        settings.app_env = original_env
+        settings.founder_api_key = original_key

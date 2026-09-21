@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings,SettingsConfigDict
 class Settings(BaseSettings):
     app_env:str="development"
     database_url:str="sqlite+pysqlite:///./ytautomation.db"
+    founder_api_key:str=""
     human_approval_required:bool=True
     publish_enabled:bool=False
     youtube_publish_enabled:bool=False
