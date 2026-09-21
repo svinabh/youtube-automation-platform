@@ -49,6 +49,23 @@ class VideoBriefGenerator:
             raise RuntimeError("AI video brief missing required structured fields")
         return json.dumps(parsed,ensure_ascii=False,indent=2)
 
+class ReviewSuggestionEngine:
+    SIGNALS: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("AI-generated visuals", "brief/script mentions AI-generated visuals"),
+        ("synthetic", "brief/script mentions synthetic content"),
+        ("realistic recreation", "brief/script mentions a realistic recreation"),
+        ("deepfake-style", "brief/script mentions deepfake-style content"),
+        ("voice clone", "brief/script mentions a voice clone"),
+    )
+
+    def suggest(self, text: str) -> tuple[bool, str]:
+        lower = text.lower()
+        reasons = [reason for signal, reason in self.SIGNALS if signal.lower() in lower]
+        if not reasons:
+            return False, "No known synthetic-content signal found in the script/brief text."
+        return True, "; ".join(reasons)
+
+
 class DisclosureTagger:
     def evaluate(self, realistic_synthetic=False, altered_real_person=False, altered_real_event=False,
                  generated_realistic_scene=False, production_assistance_only=False) -> dict:
