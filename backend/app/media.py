@@ -2,12 +2,11 @@ from pathlib import Path
 import subprocess
 
 class FFmpegRenderer:
-    """Real deterministic MP4 renderer; final TTS/scene assembly remains a later phase."""
-    def render(self,output:str,duration_seconds:float=1.0)->str:
-        path=Path(output);path.parent.mkdir(parents=True,exist_ok=True)
-        command=["ffmpeg","-y","-loglevel","error","-f","lavfi","-i","color=c=black:s=640x360:r=30",
-                 "-f","lavfi","-i","anullsrc=r=48000:cl=stereo","-t",str(duration_seconds),
-                 "-shortest","-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac",str(path)]
+    """Media utility: external video is ingested; FFmpeg is retained only for thumbnail extraction."""
+    def extract_thumbnail(self,video_path:str,thumbnail_path:str)->str:
+        source=Path(video_path); target=Path(thumbnail_path)
+        target.parent.mkdir(parents=True,exist_ok=True)
+        command=["ffmpeg","-y","-loglevel","error","-ss","0","-i",str(source),"-frames:v","1","-q:v","2",str(target)]
         subprocess.run(command,check=True,timeout=30)
-        if not path.exists() or path.stat().st_size==0: raise RuntimeError("FFmpeg produced no MP4")
-        return str(path)
+        if not target.exists() or target.stat().st_size==0: raise RuntimeError("FFmpeg produced no thumbnail")
+        return str(target)
