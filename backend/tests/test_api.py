@@ -263,10 +263,16 @@ def test_write_endpoint_requires_founder_auth():
 
 
 def test_dashboard_requires_founder_auth():
-    client = TestClient(app)
-    assert client.get("/api/dashboard").status_code == 401
-    assert client.get("/api/dashboard", headers=BAD_AUTH).status_code == 401
-    assert client.get("/api/dashboard", headers=AUTH).status_code == 200
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        client = TestClient(app)
+        assert client.get("/api/dashboard").status_code == 401
+        assert client.get("/api/dashboard", headers=BAD_AUTH).status_code == 401
+        assert client.get("/api/dashboard", headers=AUTH).status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
 
 
 def test_health_remains_public():
