@@ -18,6 +18,7 @@ class Settings(BaseSettings):
  max_daily_uploads:int=2
  youtube_daily_quota:int=10000
  global_kill_switch:bool=False
+ allowed_origins:list[str]=["http://localhost:3000"]
  model_config=SettingsConfigDict(env_file=".env",extra="ignore",case_sensitive=False)
 
 @lru_cache
