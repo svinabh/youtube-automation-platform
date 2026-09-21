@@ -271,3 +271,37 @@ def test_dashboard_requires_founder_auth():
 
 def test_health_remains_public():
     assert TestClient(app).get("/health").status_code == 200
+
+
+
+def test_all_write_endpoints_reject_missing_and_wrong_auth():
+    client = TestClient(app)
+    cases = [
+        ("/api/videos", "post", {"json": {"topic": "solar energy", "title": "Solar Energy Explained"}}),
+        ("/api/videos/no-such/run", "post", {}),
+        ("/api/videos/no-such/media", "post", {"files": {"file": ("clip.mp4", b"x", "video/mp4")}}),
+        ("/api/videos/no-such/review", "post", {"json": {"watched_confirmed": True, "disclosure_answer": True}}),
+        ("/api/videos/no-such/approval", "post", {"json": {"approve": True}}),
+        ("/api/videos/no-such/publish", "post", {}),
+    ]
+    for path, method, kwargs in cases:
+        response = getattr(client, method)(path, **kwargs)
+        assert response.status_code == 401, (path, response.status_code, response.text)
+        response = getattr(client, method)(path, headers=BAD_AUTH, **kwargs)
+        assert response.status_code == 401, (path, response.status_code, response.text)
+
+
+def test_production_startup_requires_founder_api_key(monkeypatch):
+    settings = get_settings()
+    original_env = settings.app_env
+    original_key = settings.founder_api_key
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "founder_api_key", "")
+    from app.main import startup
+    try:
+        import pytest
+        with pytest.raises(RuntimeError, match="FOUNDER_API_KEY"):
+            startup()
+    finally:
+        settings.app_env = original_env
+        settings.founder_api_key = original_key
