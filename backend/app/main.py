@@ -1,4 +1,5 @@
 from fastapi import Depends,FastAPI,HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel,Field
 from sqlalchemy.orm import Session
 from .config import get_settings
@@ -8,12 +9,13 @@ from .models import AuditEvent,Video,VideoState
 from .services import AIProvider,DisclosureTagger,PolicyEngine,RightsRegistry,VariationGuard,YouTubePublisher
 from .state import can_transition
 app=FastAPI(title="YouTube Automation Platform",version="1.1.0");settings=get_settings()
+app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 @app.on_event("startup")
 def startup(): init_db()
 class VideoCreate(BaseModel):
  topic:str=Field(min_length=3,max_length=300);title:str=Field(min_length=3,max_length=200);description:str="";script:str="";assets:list[dict]=Field(default_factory=list)
 class Approval(BaseModel): approve:bool
-def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"assets":v.assets,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path","")}
+def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"assets":v.assets,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path",""),"simulated_upload":v.simulated_upload}
 def move(db,v,target,actor):
  old=VideoState(v.state)
  if not can_transition(old,target): raise HTTPException(409,f"Invalid transition {old}->{target}")
@@ -70,4 +72,18 @@ async def publish(vid:str,db:Session=Depends(get_db)):
  if not v: raise HTTPException(404,"Video not found")
  if settings.global_kill_switch: raise HTTPException(423,"Global kill switch active")
  if v.state!=VideoState.APPROVED.value or not v.rights_cleared or not v.policy_passed or not v.artifact_path: raise HTTPException(409,"Approval, rights, policy, and media gates are required")
- result=await YouTubePublisher().upload(v.artifact_path,v.title,v.description,v.disclosure_required);move(db,v,VideoState.UPLOADED,"publisher");db.commit();return {"video":out(v),"youtube":result}
+ result=await YouTubePublisher().upload(v.artifact_path,v.title,v.description,v.disclosure_required)
+ status=result.get("status")
+ if status=="SIMULATED":
+  v.simulated_upload=True
+  db.add(AuditEvent(video_id=v.id,event="simulated_publish",actor="publisher",detail="simulated publish; no YouTube upload occurred"))
+  move(db,v,VideoState.SIMULATED_UPLOAD,"publisher")
+ elif status=="PUBLISHED":
+  v.simulated_upload=False
+  db.add(AuditEvent(video_id=v.id,event="real_publish",actor="publisher",detail="real YouTube publish completed"))
+  move(db,v,VideoState.UPLOADED,"publisher")
+ else:
+  db.add(AuditEvent(video_id=v.id,event="publish_failed",actor="publisher",detail=f"unexpected publisher status: {status!r}"))
+  db.commit()
+  raise HTTPException(502,"Publisher did not return a recognized success status")
+ db.commit();return {"video":out(v),"youtube":result}
