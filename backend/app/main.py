@@ -25,7 +25,7 @@ class HumanReview(BaseModel):
     watched_confirmed: bool
     disclosure_answer: bool
 
-def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"assets":v.assets,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"disclosure_suggestion":v.disclosure_suggestion,"disclosure_suggestion_reason":v.disclosure_suggestion_reason,"human_watched_confirmed":v.human_watched_confirmed,"human_disclosure_answer":v.human_disclosure_answer,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path",""),"thumbnail_path":getattr(v,"thumbnail_path",""),"brief":getattr(v,"brief",""),"simulated_upload":v.simulated_upload}
+def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"assets":v.assets,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"disclosure_suggestion":v.disclosure_suggestion,"disclosure_suggestion_reason":v.disclosure_suggestion_reason,"advertiser_risk_level":v.advertiser_risk_level,"human_watched_confirmed":v.human_watched_confirmed,"human_disclosure_answer":v.human_disclosure_answer,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path",""),"thumbnail_path":getattr(v,"thumbnail_path",""),"brief":getattr(v,"brief",""),"simulated_upload":v.simulated_upload}
 
 def move(db,v,target,actor):
     old=VideoState(v.state)
@@ -57,6 +57,7 @@ async def run_pipeline(video:Video,db:Session):
         video.disclosure_suggestion,video.disclosure_suggestion_reason=ReviewSuggestionEngine().suggest(suggestion_text)
         policy=PolicyEngine().evaluate(video.title,video.description,video.script,video.rights_cleared,{"required":video.disclosure_suggestion})
         video.policy_passed=policy.passed
+        video.advertiser_risk_level=policy.risk_level
         move(db,video,VideoState.REJECTED if not policy.passed else VideoState.POLICY,"policy")
     if video.state==VideoState.POLICY: move(db,video,VideoState.READY_FOR_REVIEW,"orchestrator")
     db.commit();db.refresh(video)
