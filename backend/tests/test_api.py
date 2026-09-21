@@ -91,7 +91,7 @@ def test_media_upload_stores_finished_mp4_durably_and_transitions(tmp_path,monke
  monkeypatch.setattr(get_settings(),"media_root",str(tmp_path))
  try:
   video=make_brief_video(db)
-  response=TestClient(app).post(f"/api/videos/{video.id}/media",files={"file":("clip.mp4",b"finished-video-placeholder","video/mp4")})
+  response=TestClient(app).post(f"/api/videos/{video.id}/media",headers=AUTH,files={"file":("clip.mp4",b"finished-video-placeholder","video/mp4")})
   assert response.status_code==200
   db.refresh(video)
   assert video.state==VideoState.MEDIA_RECEIVED.value
@@ -106,7 +106,7 @@ def test_media_upload_rejects_wrong_state(tmp_path,monkeypatch):
  monkeypatch.setattr(get_settings(),"media_root",str(tmp_path))
  try:
   video=make_approved_video(db)
-  response=TestClient(app).post(f"/api/videos/{video.id}/media",files={"file":("clip.mp4",b"x","video/mp4")})
+  response=TestClient(app).post(f"/api/videos/{video.id}/media",headers=AUTH,files={"file":("clip.mp4",b"x","video/mp4")})
   assert response.status_code==409
  finally:
   app.dependency_overrides.clear();db.close()
@@ -151,6 +151,7 @@ def test_review_endpoint_rejects_without_watched_confirmation():
         video = make_ready_for_review_video(db, suggestion=True)
         response = TestClient(app).post(
             f"/api/videos/{video.id}/review",
+            headers=AUTH,
             json={"watched_confirmed": False, "disclosure_answer": True},
         )
         assert response.status_code == 400
@@ -170,6 +171,7 @@ def test_approval_is_blocked_until_human_review_is_submitted():
         video = make_ready_for_review_video(db, suggestion=True)
         response = TestClient(app).post(
             f"/api/videos/{video.id}/approval",
+            headers=AUTH,
             json={"approve": True},
         )
         assert response.status_code == 409
@@ -188,6 +190,7 @@ def test_human_disclosure_answer_overrides_system_suggestion():
         video = make_ready_for_review_video(db, suggestion=True)
         response = TestClient(app).post(
             f"/api/videos/{video.id}/review",
+            headers=AUTH,
             json={"watched_confirmed": True, "disclosure_answer": False},
         )
         assert response.status_code == 200
@@ -209,11 +212,13 @@ def test_approval_succeeds_after_explicit_human_review():
         video = make_ready_for_review_video(db, suggestion=True)
         review = TestClient(app).post(
             f"/api/videos/{video.id}/review",
+            headers=AUTH,
             json={"watched_confirmed": True, "disclosure_answer": True},
         )
         assert review.status_code == 200
         approval_response = TestClient(app).post(
             f"/api/videos/{video.id}/approval",
+            headers=AUTH,
             json={"approve": True},
         )
         assert approval_response.status_code == 200
