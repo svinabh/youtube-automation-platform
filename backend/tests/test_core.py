@@ -25,11 +25,20 @@ def test_other_guards():
  assert not BudgetGuard(5).allowed(3,3)
  assert QuotaManager(100).allowed(20,80)
 
-def test_ffmpeg_produces_real_mp4(tmp_path):
- output=tmp_path/"artifact.mp4"
- assert FFmpegRenderer().render(str(output))==str(output)
- assert output.exists() and output.stat().st_size>1024
- assert output.read_bytes()[4:8]==b"ftyp"
+def test_ffmpeg_extracts_thumbnail_from_uploaded_video(tmp_path):
+ source=tmp_path/"uploaded.mp4"
+ thumbnail=tmp_path/"thumbnail.jpg"
+ import subprocess
+ subprocess.run(
+  [
+   "ffmpeg","-y","-loglevel","error","-f","lavfi","-i",
+   "color=c=black:s=320x180:d=1","-c:v","libx264","-pix_fmt","yuv420p",
+   str(source),
+  ],
+  check=True,
+ )
+ assert FFmpegRenderer().extract_thumbnail(str(source),str(thumbnail))==str(thumbnail)
+ assert thumbnail.exists() and thumbnail.stat().st_size>0
 
 def test_video_model_has_media_artifact_field():
  assert "artifact_path" in Video.__table__.columns

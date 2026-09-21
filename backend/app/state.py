@@ -3,7 +3,9 @@ from .models import VideoState
 ALLOWED={
  VideoState.IDEA:{VideoState.RESEARCHED},
  VideoState.RESEARCHED:{VideoState.SCRIPTED},
- VideoState.SCRIPTED:{VideoState.GENERATED,VideoState.REJECTED},
+ VideoState.SCRIPTED:{VideoState.BRIEF_READY,VideoState.REJECTED},
+ VideoState.BRIEF_READY:{VideoState.MEDIA_RECEIVED,VideoState.REJECTED},
+ VideoState.MEDIA_RECEIVED:{VideoState.QC,VideoState.REJECTED},
  VideoState.GENERATED:{VideoState.QC,VideoState.REJECTED},
  VideoState.QC:{VideoState.POLICY,VideoState.REJECTED},
  VideoState.POLICY:{VideoState.READY_FOR_REVIEW},

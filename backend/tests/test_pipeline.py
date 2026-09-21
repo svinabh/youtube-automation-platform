@@ -1,3 +1,4 @@
+import json
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +17,20 @@ def db():
 def cleared_asset():
  return [{"source":"creator-upload","license":"CC BY 4.0","cleared":True}]
 
+def brief_json():
+ return json.dumps({
+  "scenes":[{"scene_number":1,"duration_seconds":8,"visual":"Solar panels at sunrise","tone":"clear","narration_focus":"verified solar-energy fact"}],
+  "target_duration_seconds":8,
+  "aspect_ratio":"9:16",
+  "voice_and_pacing_notes":"Calm, concise pacing."
+ })
+
+class FakeProvider:
+ async def generate(self,prompt):
+  if "production-ready video brief" in prompt:
+   return brief_json()
+  return "REAL AI GENERATED SCRIPT: explain solar energy with verified claims."
+
 @pytest.mark.asyncio
 async def test_pipeline_rejects_assets_without_license(monkeypatch,db):
  class ExplodingProvider:
@@ -29,38 +44,23 @@ async def test_pipeline_rejects_assets_without_license(monkeypatch,db):
  assert video.state==VideoState.REJECTED.value
 
 @pytest.mark.asyncio
-async def test_pipeline_accepts_cleared_assets_and_continues(monkeypatch,db):
- class FakeProvider:
-  async def generate(self,prompt): return "REAL AI GENERATED SCRIPT: explain solar energy with verified claims."
- class FakeRenderer:
-  def render(self,path): return path
+async def test_pipeline_generates_real_structured_brief(monkeypatch,db):
  monkeypatch.setattr(AIProvider,"get",staticmethod(lambda:FakeProvider()))
- monkeypatch.setattr("app.main.FFmpegRenderer",FakeRenderer)
  video=Video(topic="solar energy",title="Solar Energy Explained",assets=cleared_asset(),state=VideoState.SCRIPTED.value)
  db.add(video);db.commit()
  await run_pipeline(video,db)
  assert video.rights_cleared is True
- assert video.state==VideoState.READY_FOR_REVIEW.value
- assert video.artifact_path.endswith(".mp4")
+ assert video.state==VideoState.BRIEF_READY.value
+ assert video.brief and "Solar panels at sunrise" in video.brief
+ parsed=json.loads(video.brief)
+ assert parsed["aspect_ratio"]=="9:16"
+ assert "REAL AI GENERATED SCRIPT:" in video.script
 
 @pytest.mark.asyncio
-async def test_pipeline_calls_ai_and_replaces_placeholder(monkeypatch,db):
- class FakeProvider:
-  async def generate(self,prompt):
-   assert "YouTube script" in prompt
-   return "REAL AI GENERATED SCRIPT: explain solar energy with three verified claims."
- monkeypatch.setattr(AIProvider,"get",staticmethod(lambda:FakeProvider()))
- video=Video(topic="solar energy",title="Solar Energy Explained",assets=cleared_asset(),state=VideoState.SCRIPTED.value)
- db.add(video);db.commit()
- await run_pipeline(video,db)
- assert video.script.startswith("REAL AI GENERATED SCRIPT:")
- assert video.script!="Research-backed draft for: "+video.topic
- assert video.artifact_path.endswith(".mp4")
-
-@pytest.mark.asyncio
-async def test_pipeline_enforces_variation_before_generated(monkeypatch,db):
+async def test_pipeline_enforces_variation_before_brief(monkeypatch,db):
  class DuplicateProvider:
-  async def generate(self,prompt): return "the quick brown fox jumps over the lazy dog repeatedly"
+  async def generate(self,prompt):
+   return "the quick brown fox jumps over the lazy dog repeatedly"
  monkeypatch.setattr(AIProvider,"get",staticmethod(lambda:DuplicateProvider()))
  old=Video(topic="old",title="Old",script="the quick brown fox jumps over the lazy dog repeatedly",state=VideoState.GENERATED.value,assets=cleared_asset())
  candidate=Video(topic="new",title="New",state=VideoState.SCRIPTED.value,assets=cleared_asset())

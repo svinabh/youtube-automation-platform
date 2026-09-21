@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     ollama_model:str="llama3.2:3b"
     ai_provider:str="ollama"
     media_root:str="./media"
+    max_media_upload_mb:int=500
     max_daily_spend_usd:float=5
     max_daily_uploads:int=2
     youtube_daily_quota:int=10000
