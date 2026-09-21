@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.main import app
 from app.models import AuditEvent,Base,Video,VideoState
-from app.services import YouTubePublisher
+from app.services import ReviewSuggestionEngine, YouTubePublisher
 
 def make_db():
  engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool)
@@ -105,3 +105,133 @@ def test_media_upload_rejects_wrong_state(tmp_path,monkeypatch):
   assert response.status_code==409
  finally:
   app.dependency_overrides.clear();db.close()
+
+
+def make_ready_for_review_video(db, suggestion=False):
+    video = Video(
+        topic="synthetic media",
+        title="Synthetic Media Explained",
+        description="",
+        script="A verified script.",
+        brief='{"scenes":[{"visual":"AI-generated visuals of a city"}],"target_duration_seconds":30,"aspect_ratio":"9:16","voice_and_pacing_notes":"clear"}'
+        if suggestion
+        else '{"scenes":[{"visual":"Original camera footage"}],"target_duration_seconds":30,"aspect_ratio":"9:16","voice_and_pacing_notes":"clear"}',
+        state=VideoState.READY_FOR_REVIEW.value,
+        rights_cleared=True,
+        policy_passed=True,
+        artifact_path="",
+        disclosure_suggestion=suggestion,
+        disclosure_suggestion_reason="brief/script mentions AI-generated visuals" if suggestion else "No known synthetic-content signal found in the script/brief text.",
+    )
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+def test_review_suggestion_engine_detects_positive_and_negative_signals():
+    engine = ReviewSuggestionEngine()
+    positive, positive_reason = engine.suggest("The video uses AI-generated visuals and a voice clone.")
+    negative, negative_reason = engine.suggest("The video uses original camera footage and a human-recorded voice.")
+    assert positive is True
+    assert "AI-generated visuals" in positive_reason
+    assert negative is False
+    assert "No known synthetic-content signal" in negative_reason
+
+
+def test_review_endpoint_rejects_without_watched_confirmation():
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        video = make_ready_for_review_video(db, suggestion=True)
+        response = TestClient(app).post(
+            f"/api/videos/{video.id}/review",
+            json={"watched_confirmed": False, "disclosure_answer": True},
+        )
+        assert response.status_code == 400
+        db.refresh(video)
+        assert video.human_watched_confirmed is False
+        assert video.human_disclosure_answer is None
+        assert video.disclosure_required is False
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+def test_approval_is_blocked_until_human_review_is_submitted():
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        video = make_ready_for_review_video(db, suggestion=True)
+        response = TestClient(app).post(
+            f"/api/videos/{video.id}/approval",
+            json={"approve": True},
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Review required before approval"
+        db.refresh(video)
+        assert video.state == VideoState.READY_FOR_REVIEW.value
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+def test_human_disclosure_answer_overrides_system_suggestion():
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        video = make_ready_for_review_video(db, suggestion=True)
+        response = TestClient(app).post(
+            f"/api/videos/{video.id}/review",
+            json={"watched_confirmed": True, "disclosure_answer": False},
+        )
+        assert response.status_code == 200
+        db.refresh(video)
+        assert video.human_watched_confirmed is True
+        assert video.human_disclosure_answer is False
+        assert video.disclosure_required is False
+        assert video.disclosure_suggestion is True
+        assert video.disclosure_suggestion != video.disclosure_required
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+def test_approval_succeeds_after_explicit_human_review():
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        video = make_ready_for_review_video(db, suggestion=True)
+        review = TestClient(app).post(
+            f"/api/videos/{video.id}/review",
+            json={"watched_confirmed": True, "disclosure_answer": True},
+        )
+        assert review.status_code == 200
+        approval_response = TestClient(app).post(
+            f"/api/videos/{video.id}/approval",
+            json={"approve": True},
+        )
+        assert approval_response.status_code == 200
+        db.refresh(video)
+        assert video.state == VideoState.APPROVED.value
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+def test_uploaded_media_is_streamed_by_review_endpoint(tmp_path):
+    db = make_db()
+    app.dependency_overrides[get_db] = override_db(db)
+    try:
+        media = tmp_path / "video.mp4"
+        media.write_bytes(b"fake-mp4-for-stream-test")
+        video = make_ready_for_review_video(db)
+        video.artifact_path = str(media)
+        db.commit()
+        response = TestClient(app).get(f"/api/videos/{video.id}/media")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("video/mp4")
+        assert response.content == b"fake-mp4-for-stream-test"
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
