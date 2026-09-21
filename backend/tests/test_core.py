@@ -6,6 +6,7 @@ from app.state import can_transition
 def test_state():
  assert can_transition(VideoState.READY_FOR_REVIEW,VideoState.APPROVED)
  assert not can_transition(VideoState.READY_FOR_REVIEW,VideoState.UPLOADED)
+ assert can_transition(VideoState.APPROVED,VideoState.SIMULATED_UPLOAD)
 
 def test_variation_guard_rejects_duplicate():
  g=VariationGuard();script="the quick brown fox jumps over the lazy dog"
@@ -32,3 +33,4 @@ def test_ffmpeg_produces_real_mp4(tmp_path):
 
 def test_video_model_has_media_artifact_field():
  assert "artifact_path" in Video.__table__.columns
+ assert "simulated_upload" in Video.__table__.columns
