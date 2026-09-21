@@ -47,6 +47,7 @@ class Video(Base):
     disclosure_required: Mapped[bool] = mapped_column(Boolean, default=False)
     disclosure_suggestion: Mapped[bool] = mapped_column(Boolean, default=False)
     disclosure_suggestion_reason: Mapped[str] = mapped_column(Text, default="")
+    advertiser_risk_level: Mapped[str] = mapped_column(String(16), default="LOW")
     human_watched_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     human_disclosure_answer: Mapped[bool | None] = mapped_column(
         Boolean, nullable=True, default=None
