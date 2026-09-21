@@ -16,3 +16,8 @@ For local development, the default `ALLOWED_ORIGINS` is `["http://localhost:3000
 At READY_FOR_REVIEW, the dashboard presents the uploaded MP4, download fallback, script/brief, rights result, advertiser-risk heuristic, and the disclosure suggestion with its reason in one mobile-friendly review card. The disclosure suggestion is only a pre-fill hint; the founder must explicitly select Yes or No and confirm that they watched the full video and it matches the script/brief. Approval stays disabled until the video is playable, the disclosure choice is explicitly confirmed, and the watch-confirmation checkbox is checked.
 
 Automated checks are text/metadata checks only and cannot verify the actual video/audio. The final visual/audio match decision remains human.
+
+
+### Founder authentication
+
+All dashboard access and state-changing API endpoints require `Authorization: Bearer <FOUNDER_API_KEY>`. The `/health` endpoint remains public. In production, `FOUNDER_API_KEY` must be set or the backend refuses to start. The founder dashboard stores the key only in the browser's localStorage for that device and sends it with authenticated API requests.
