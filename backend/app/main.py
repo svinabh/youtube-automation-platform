@@ -1,13 +1,14 @@
 from pathlib import Path
 from fastapi import Depends,FastAPI,File,HTTPException,UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel,Field
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .db import get_db,init_db
 from .media import FFmpegRenderer
 from .models import AuditEvent,Video,VideoState
-from .services import AIProvider,DisclosureTagger,PolicyEngine,RightsRegistry,VariationGuard,VideoBriefGenerator,YouTubePublisher
+from .services import AIProvider,PolicyEngine,RightsRegistry,ReviewSuggestionEngine,VariationGuard,VideoBriefGenerator,YouTubePublisher
 from .state import can_transition
 app=FastAPI(title="YouTube Automation Platform",version="1.2.0");settings=get_settings()
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
@@ -17,9 +18,15 @@ def startup(): init_db()
 
 class VideoCreate(BaseModel):
     topic:str=Field(min_length=3,max_length=300);title:str=Field(min_length=3,max_length=200);description:str="";script:str="";assets:list[dict]=Field(default_factory=list)
-class Approval(BaseModel): approve:bool
+class Approval(BaseModel):
+    approve: bool
 
-def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"assets":v.assets,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path",""),"thumbnail_path":getattr(v,"thumbnail_path",""),"brief":getattr(v,"brief",""),"simulated_upload":v.simulated_upload}
+
+class HumanReview(BaseModel):
+    watched_confirmed: bool
+    disclosure_answer: bool
+
+def out(v): return {"id":v.id,"topic":v.topic,"title":v.title,"state":v.state,"assets":v.assets,"rights_cleared":v.rights_cleared,"policy_passed":v.policy_passed,"disclosure_required":v.disclosure_required,"disclosure_suggestion":v.disclosure_suggestion,"disclosure_suggestion_reason":v.disclosure_suggestion_reason,"advertiser_risk_level":v.advertiser_risk_level,"human_watched_confirmed":v.human_watched_confirmed,"human_disclosure_answer":v.human_disclosure_answer,"approved_by_human":v.approved_by_human,"artifact_path":getattr(v,"artifact_path",""),"thumbnail_path":getattr(v,"thumbnail_path",""),"brief":getattr(v,"brief",""),"simulated_upload":v.simulated_upload}
 
 def move(db,v,target,actor):
     old=VideoState(v.state)
@@ -47,8 +54,11 @@ async def run_pipeline(video:Video,db:Session):
         # External video ingestion replaces the former internal GENERATED/FFmpeg synthesis step.
         move(db,video,VideoState.QC,"orchestrator")
     if video.state==VideoState.QC:
-        disclosure=DisclosureTagger().evaluate(production_assistance_only=True);video.disclosure_required=disclosure["required"]
-        policy=PolicyEngine().evaluate(video.title,video.description,video.script,video.rights_cleared,disclosure);video.policy_passed=policy.passed
+        suggestion_text=f"{video.title}\n{video.topic}\n{video.script}\n{video.brief}"
+        video.disclosure_suggestion,video.disclosure_suggestion_reason=ReviewSuggestionEngine().suggest(suggestion_text)
+        policy=PolicyEngine().evaluate(video.title,video.description,video.script,video.rights_cleared,{"required":video.disclosure_suggestion})
+        video.policy_passed=policy.passed
+        video.advertiser_risk_level=policy.risk_level
         move(db,video,VideoState.REJECTED if not policy.passed else VideoState.POLICY,"policy")
     if video.state==VideoState.POLICY: move(db,video,VideoState.READY_FOR_REVIEW,"orchestrator")
     db.commit();db.refresh(video)
@@ -100,11 +110,53 @@ async def receive_media(vid:str,file:UploadFile=File(...),db:Session=Depends(get
     db.commit();db.refresh(v)
     return out(v)
 
+@app.get("/api/videos/{vid}/media")
+def stream_media(vid: str, db: Session = Depends(get_db)):
+    v = db.get(Video, vid)
+    if not v:
+        raise HTTPException(404, "Video not found")
+    if not v.artifact_path or not Path(v.artifact_path).is_file():
+        raise HTTPException(404, "Video file is not available")
+    return FileResponse(
+        v.artifact_path,
+        media_type="video/mp4",
+        filename=f"{v.id}.mp4",
+        content_disposition_type="inline",
+    )
+
+
+@app.post("/api/videos/{vid}/review")
+def review(vid: str, p: HumanReview, db: Session = Depends(get_db)):
+    v = db.get(Video, vid)
+    if not v:
+        raise HTTPException(404, "Video not found")
+    if v.state != VideoState.READY_FOR_REVIEW.value:
+        raise HTTPException(409, "Video is not ready for human review")
+    if not p.watched_confirmed:
+        raise HTTPException(400, "You must confirm that you watched the full video before review")
+    v.human_watched_confirmed = True
+    v.human_disclosure_answer = p.disclosure_answer
+    v.disclosure_required = p.disclosure_answer
+    db.add(
+        AuditEvent(
+            video_id=v.id,
+            event="human_review",
+            actor="founder",
+            detail=f"watched_confirmed=true; disclosure_answer={p.disclosure_answer}",
+        )
+    )
+    db.commit()
+    db.refresh(v)
+    return out(v)
+
+
 @app.post("/api/videos/{vid}/approval")
 def approval(vid:str,p:Approval,db:Session=Depends(get_db)):
     v=db.get(Video,vid)
     if not v: raise HTTPException(404,"Video not found")
     if v.state!=VideoState.READY_FOR_REVIEW.value: raise HTTPException(409,"Not awaiting approval")
+    if not v.human_watched_confirmed or v.human_disclosure_answer is None:
+        raise HTTPException(409,"Review required before approval")
     move(db,v,VideoState.APPROVED if p.approve else VideoState.REJECTED,"founder");v.approved_by_human=p.approve;db.commit();return out(v)
 
 @app.post("/api/videos/{vid}/publish")

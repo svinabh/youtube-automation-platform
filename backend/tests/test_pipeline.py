@@ -67,3 +67,39 @@ async def test_pipeline_enforces_variation_before_brief(monkeypatch,db):
  db.add_all([old,candidate]);db.commit()
  await run_pipeline(candidate,db)
  assert candidate.state==VideoState.REJECTED.value
+
+
+@pytest.mark.asyncio
+async def test_qc_wires_disclosure_suggestion_without_setting_final_value(db):
+    positive = Video(
+        topic="synthetic media",
+        title="AI Visuals",
+        script="Use synthetic visuals for the explainer.",
+        brief='{"scenes":[{"visual":"AI-generated visuals of a city"}]}',
+        state=VideoState.MEDIA_RECEIVED.value,
+        assets=cleared_asset(),
+        rights_cleared=True,
+    )
+    negative = Video(
+        topic="nature",
+        title="Nature Walk",
+        script="Use original camera footage.",
+        brief='{"scenes":[{"visual":"original camera footage"}]}',
+        state=VideoState.MEDIA_RECEIVED.value,
+        assets=cleared_asset(),
+        rights_cleared=True,
+    )
+    db.add_all([positive, negative])
+    db.commit()
+
+    await run_pipeline(positive, db)
+    await run_pipeline(negative, db)
+
+    assert positive.state == VideoState.READY_FOR_REVIEW.value
+    assert positive.disclosure_suggestion is True
+    assert "AI-generated visuals" in positive.disclosure_suggestion_reason
+    assert positive.disclosure_required is False
+
+    assert negative.state == VideoState.READY_FOR_REVIEW.value
+    assert negative.disclosure_suggestion is False
+    assert negative.disclosure_required is False
